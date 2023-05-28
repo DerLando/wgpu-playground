@@ -11,10 +11,10 @@ use winit::{
 };
 
 fn load_shader(path: &str, device: &Device) -> Result<ShaderModule, std::io::Error> {
-    let shader = std::fs::read_to_string(path)?;
+    let shader = read_or_create_shader(path);
     Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(&shader)),
+        source: wgpu::ShaderSource::Wgsl(shader),
     }))
 }
 
@@ -172,8 +172,21 @@ enum CustomEvent {
     ShaderFileChangedEvent,
 }
 
+fn read_or_create_shader(path: &str) -> Cow<str> {
+    if std::path::Path::exists(std::path::Path::new(path)) {
+        Cow::Owned(std::fs::read_to_string(path).unwrap())
+    } else {
+        let shader = include_str!("shader.wgsl");
+        std::fs::write(path, shader);
+        Cow::Owned(shader.to_string())
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
+
+    // make sure the shader file exists
+    let _ = read_or_create_shader(&cli.shader_path);
 
     let event_loop = EventLoopBuilder::<CustomEvent>::with_user_event().build();
 
