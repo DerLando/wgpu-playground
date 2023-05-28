@@ -6,7 +6,7 @@ use wgpu::{
 };
 use winit::{
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::{ControlFlow, EventLoop, EventLoopBuilder},
     window::Window,
 };
 
@@ -44,7 +44,7 @@ fn create_pipeline(
     })
 }
 
-async fn run(event_loop: EventLoop<()>, window: Window) {
+async fn run(event_loop: EventLoop<CustomEvent>, window: Window) {
     let size = window.inner_size();
 
     let instance = wgpu::Instance::default();
@@ -150,6 +150,7 @@ async fn run(event_loop: EventLoop<()>, window: Window) {
                 queue.submit(Some(encoder.finish()));
                 frame.present();
             }
+            Event::UserEvent(event) => println!("{event:?}"),
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
@@ -166,11 +167,27 @@ struct Cli {
     shader_path: String,
 }
 
+#[derive(Debug)]
+enum CustomEvent {
+    ShaderFileChangedEvent,
+}
+
 fn main() {
     let cli = Cli::parse();
 
-    let event_loop = EventLoop::new();
+    let event_loop = EventLoopBuilder::<CustomEvent>::with_user_event().build();
+
+    // Proxy lets us fire custom events form any thread
+    let event_loop_proxy = event_loop.create_proxy();
     let window = winit::window::Window::new(&event_loop).unwrap();
+
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        event_loop_proxy
+            .send_event(CustomEvent::ShaderFileChangedEvent)
+            .ok();
+    });
+
     #[cfg(not(target_arch = "wasm32"))]
     {
         env_logger::init();
