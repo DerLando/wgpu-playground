@@ -1,4 +1,5 @@
 use clap::{command, Parser, Subcommand};
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::borrow::Cow;
 use wgpu::{
     Device, PipelineLayout, PipelineLayoutDescriptor, RenderPipeline, ShaderModule,
@@ -44,7 +45,7 @@ fn create_pipeline(
     })
 }
 
-async fn run(event_loop: EventLoop<CustomEvent>, window: Window) {
+async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &str) {
     let size = window.inner_size();
 
     let instance = wgpu::Instance::default();
@@ -76,7 +77,7 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window) {
         .expect("Failed to create device");
 
     // Load the shaders from disk
-    let shader = load_shader("src/shader.wgsl", &device).unwrap();
+    let shader = load_shader(shader_path, &device).unwrap();
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
@@ -184,6 +185,7 @@ fn read_or_create_shader(path: &str) -> Cow<str> {
 
 fn main() {
     let cli = Cli::parse();
+    let shader_path = cli.shader_path.clone();
 
     // make sure the shader file exists
     let _ = read_or_create_shader(&cli.shader_path);
@@ -194,17 +196,34 @@ fn main() {
     let event_loop_proxy = event_loop.create_proxy();
     let window = winit::window::Window::new(&event_loop).unwrap();
 
-    std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_millis(1000));
-        event_loop_proxy
-            .send_event(CustomEvent::ShaderFileChangedEvent)
-            .ok();
+    // file system changes notification
+    std::thread::spawn(move || {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut watcher = RecommendedWatcher::new(tx, Config::default()).unwrap();
+
+        watcher
+            .watch(
+                std::path::Path::new(&shader_path),
+                RecursiveMode::NonRecursive,
+            )
+            .unwrap();
+
+        for res in rx {
+            match res {
+                Ok(event) => {
+                    event_loop_proxy
+                        .send_event(CustomEvent::ShaderFileChangedEvent)
+                        .ok();
+                }
+                Err(e) => println!("watch error: {:?}", e),
+            }
+        }
     });
 
     #[cfg(not(target_arch = "wasm32"))]
     {
         env_logger::init();
-        pollster::block_on(run(event_loop, window));
+        pollster::block_on(run(event_loop, window, &cli.shader_path));
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -220,6 +239,6 @@ fn main() {
                     .ok()
             })
             .expect("couldn't append canvas to document body");
-        wasm_bindgen_futures::spawn_local(run(event_loop, window));
+        wasm_bindgen_futures::spawn_local(run(event_loop, window, &cli.shader_path));
     }
 }
