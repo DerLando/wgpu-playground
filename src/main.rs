@@ -45,6 +45,10 @@ fn create_pipeline(
     })
 }
 
+struct RenderState {
+    pipeline: RenderPipeline,
+}
+
 async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &str) {
     let size = window.inner_size();
 
@@ -103,6 +107,10 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
 
     surface.configure(&device, &config);
 
+    let mut state = RenderState {
+        pipeline: render_pipeline,
+    };
+
     event_loop.run(move |event, _, control_flow| {
         // Have the closure take ownership of the resources.
         // `event_loop.run` never returns, therefore we must do this to ensure
@@ -138,20 +146,32 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
                             view: &view,
                             resolve_target: None,
                             ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                 store: true,
                             },
                         })],
                         depth_stencil_attachment: None,
                     });
-                    rpass.set_pipeline(&render_pipeline);
+                    rpass.set_pipeline(&state.pipeline);
                     rpass.draw(0..3, 0..1);
                 }
 
                 queue.submit(Some(encoder.finish()));
                 frame.present();
             }
-            Event::UserEvent(event) => println!("{event:?}"),
+            Event::UserEvent(event) => match event {
+                CustomEvent::ShaderFileChangedEvent(path) => {
+                    let shader = load_shader(&path, &device).unwrap();
+                    let render_pipeline = create_pipeline(
+                        &device,
+                        &pipeline_layout,
+                        &swapchain_capabilities,
+                        &shader,
+                    );
+                    state.pipeline = render_pipeline;
+                    window.request_redraw();
+                }
+            },
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
@@ -170,7 +190,7 @@ struct Cli {
 
 #[derive(Debug)]
 enum CustomEvent {
-    ShaderFileChangedEvent,
+    ShaderFileChangedEvent(String),
 }
 
 fn read_or_create_shader(path: &str) -> Cow<str> {
@@ -211,8 +231,11 @@ fn main() {
         for res in rx {
             match res {
                 Ok(event) => {
+                    // println!("{event:?}");
                     event_loop_proxy
-                        .send_event(CustomEvent::ShaderFileChangedEvent)
+                        .send_event(CustomEvent::ShaderFileChangedEvent(String::from(
+                            &shader_path,
+                        )))
                         .ok();
                 }
                 Err(e) => println!("watch error: {:?}", e),
