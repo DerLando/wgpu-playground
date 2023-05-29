@@ -6,6 +6,7 @@ use wgpu::{
     SurfaceCapabilities, TextureFormat,
 };
 use winit::{
+    dpi::LogicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop, EventLoopBuilder},
     window::Window,
@@ -153,7 +154,7 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
                         depth_stencil_attachment: None,
                     });
                     rpass.set_pipeline(&state.pipeline);
-                    rpass.draw(0..3, 0..1);
+                    rpass.draw(0..6, 0..1);
                 }
 
                 queue.submit(Some(encoder.finish()));
@@ -215,6 +216,8 @@ fn main() {
     // Proxy lets us fire custom events form any thread
     let event_loop_proxy = event_loop.create_proxy();
     let window = winit::window::Window::new(&event_loop).unwrap();
+    window.set_inner_size(LogicalSize::new(600.0, 600.0));
+    window.set_resizable(false);
 
     // file system changes notification
     std::thread::spawn(move || {
