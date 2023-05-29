@@ -2,7 +2,7 @@ use clap::{command, Parser, Subcommand};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::borrow::Cow;
 use wgpu::{
-    Device, PipelineLayout, PipelineLayoutDescriptor, RenderPipeline, ShaderModule,
+    Device, PipelineLayout, PipelineLayoutDescriptor, RenderPipeline, ShaderModule, ShaderSource,
     SurfaceCapabilities, TextureFormat,
 };
 use winit::{
@@ -24,18 +24,19 @@ fn create_pipeline(
     device: &Device,
     pipeline_layout: &PipelineLayout,
     capabilities: &SurfaceCapabilities,
-    shader: &ShaderModule,
+    vertex_shader: &ShaderModule,
+    fragment_shader: &ShaderModule,
 ) -> RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: None,
         layout: Some(&pipeline_layout),
         vertex: wgpu::VertexState {
-            module: &shader,
+            module: &vertex_shader,
             entry_point: "vs_main",
             buffers: &[],
         },
         fragment: Some(wgpu::FragmentState {
-            module: &shader,
+            module: &fragment_shader,
             entry_point: "fs_main",
             targets: &[Some(capabilities.formats[0].into())],
         }),
@@ -82,7 +83,11 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
         .expect("Failed to create device");
 
     // Load the shaders from disk
-    let shader = load_shader(shader_path, &device).unwrap();
+    let vertex_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: None,
+        source: ShaderSource::Wgsl(Cow::Owned(include_str!("vertex.default.wgsl").to_string())),
+    });
+    let fragment_shader = load_shader(shader_path, &device).unwrap();
 
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
@@ -93,8 +98,13 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
     let swapchain_capabilities = surface.get_capabilities(&adapter);
     let swapchain_format = swapchain_capabilities.formats[0];
 
-    let render_pipeline =
-        create_pipeline(&device, &pipeline_layout, &swapchain_capabilities, &shader);
+    let render_pipeline = create_pipeline(
+        &device,
+        &pipeline_layout,
+        &swapchain_capabilities,
+        &vertex_shader,
+        &fragment_shader,
+    );
 
     let mut config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -116,7 +126,7 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
         // Have the closure take ownership of the resources.
         // `event_loop.run` never returns, therefore we must do this to ensure
         // the resources are properly cleaned up.
-        let _ = (&instance, &adapter, &shader, &pipeline_layout);
+        let _ = (&instance, &adapter, &vertex_shader, &pipeline_layout);
 
         *control_flow = ControlFlow::Wait;
         match event {
@@ -162,12 +172,13 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
             }
             Event::UserEvent(event) => match event {
                 CustomEvent::ShaderFileChangedEvent(path) => {
-                    let shader = load_shader(&path, &device).unwrap();
+                    let fragment_shader = load_shader(&path, &device).unwrap();
                     let render_pipeline = create_pipeline(
                         &device,
                         &pipeline_layout,
                         &swapchain_capabilities,
-                        &shader,
+                        &vertex_shader,
+                        &fragment_shader,
                     );
                     state.pipeline = render_pipeline;
                     window.request_redraw();
@@ -198,7 +209,7 @@ fn read_or_create_shader(path: &str) -> Cow<str> {
     if std::path::Path::exists(std::path::Path::new(path)) {
         Cow::Owned(std::fs::read_to_string(path).unwrap())
     } else {
-        let shader = include_str!("shader.wgsl");
+        let shader = include_str!("fragment.default.wgsl");
         std::fs::write(path, shader);
         Cow::Owned(shader.to_string())
     }
