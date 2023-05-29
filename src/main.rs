@@ -1,9 +1,11 @@
 use clap::{command, Parser, Subcommand};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
-use std::borrow::Cow;
+use std::{borrow::Cow, time::Instant};
 use wgpu::{
-    Device, PipelineLayout, PipelineLayoutDescriptor, RenderPipeline, ShaderModule, ShaderSource,
-    SurfaceCapabilities, TextureFormat,
+    util::{BufferInitDescriptor, DeviceExt},
+    BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry, Buffer,
+    BufferBindingType, BufferUsages, Device, PipelineLayout, PipelineLayoutDescriptor,
+    RenderPipeline, ShaderModule, ShaderSource, ShaderStages, SurfaceCapabilities, TextureFormat,
 };
 use winit::{
     dpi::LogicalSize,
@@ -47,13 +49,37 @@ fn create_pipeline(
     })
 }
 
+fn create_time_uniform_layout(device: &Device) -> BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("EllapsedTimeMs"),
+        entries: &[BindGroupLayoutEntry {
+            binding: 0,
+            visibility: ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+    })
+}
+
+fn create_time_buffer(device: &Device) -> Buffer {
+    device.create_buffer_init(&BufferInitDescriptor {
+        label: Some("Time Buffer"),
+        contents: &0u32.to_le_bytes(),
+        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+    })
+}
+
 struct RenderState {
     pipeline: RenderPipeline,
 }
 
 async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &str) {
     let size = window.inner_size();
-
+    let start_time = Instant::now();
     let instance = wgpu::Instance::default();
 
     let surface = unsafe { instance.create_surface(&window) }.unwrap();
@@ -89,9 +115,20 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
     });
     let fragment_shader = load_shader(shader_path, &device).unwrap();
 
+    let time_buffer_layout = create_time_uniform_layout(&device);
+    let time_buffer = create_time_buffer(&device);
+    let time_bind_group = device.create_bind_group(&BindGroupDescriptor {
+        label: Some("time_uniform_bindgroup"),
+        layout: &time_buffer_layout,
+        entries: &[BindGroupEntry {
+            binding: 0,
+            resource: time_buffer.as_entire_binding(),
+        }],
+    });
+
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
-        bind_group_layouts: &[],
+        bind_group_layouts: &[&time_buffer_layout],
         push_constant_ranges: &[],
     });
 
@@ -128,7 +165,8 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
         // the resources are properly cleaned up.
         let _ = (&instance, &adapter, &vertex_shader, &pipeline_layout);
 
-        *control_flow = ControlFlow::Wait;
+        // *control_flow = ControlFlow::Wait;
+        *control_flow = ControlFlow::Poll;
         match event {
             Event::WindowEvent {
                 event: WindowEvent::Resized(size),
@@ -164,9 +202,13 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
                         depth_stencil_attachment: None,
                     });
                     rpass.set_pipeline(&state.pipeline);
+                    rpass.set_bind_group(0, &time_bind_group, &[]);
                     rpass.draw(0..6, 0..1);
                 }
 
+                let elapsed = start_time.elapsed().as_millis() as u32;
+
+                queue.write_buffer(&time_buffer, 0, &elapsed.to_le_bytes());
                 queue.submit(Some(encoder.finish()));
                 frame.present();
             }
@@ -190,6 +232,7 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
             } => *control_flow = ControlFlow::Exit,
             _ => {}
         }
+        window.request_redraw();
     });
 }
 

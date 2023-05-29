@@ -4,7 +4,10 @@ struct VertexOutput {
     @location(0) coord: vec2<f32>,
 }
 
+@group(0) @binding(0)
+var<uniform> time: u32; // Ellapsed time in ms
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.coord, 0.0, 1.0);
+    return vec4<f32>(in.coord, sin(time), 1.0);
 }
