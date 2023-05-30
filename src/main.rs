@@ -1,4 +1,5 @@
 use clap::{command, Parser, Subcommand};
+use naga::front::wgsl::ParseError;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::{borrow::Cow, time::Instant};
 use wgpu::{
@@ -14,12 +15,15 @@ use winit::{
     window::Window,
 };
 
-fn load_shader(path: &str, device: &Device) -> Result<ShaderModule, std::io::Error> {
+fn load_shader(path: &str, device: &Device) -> Result<ShaderModule, ParseError> {
     let shader = read_or_create_shader(path);
-    Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: None,
-        source: wgpu::ShaderSource::Wgsl(shader),
-    }))
+    match naga::front::wgsl::parse_str(&shader) {
+        Ok(_) => Ok(device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(shader),
+        })),
+        Err(e) => Err(e),
+    }
 }
 
 fn create_pipeline(
@@ -214,16 +218,17 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
             }
             Event::UserEvent(event) => match event {
                 CustomEvent::ShaderFileChangedEvent(path) => {
-                    let fragment_shader = load_shader(&path, &device).unwrap();
-                    let render_pipeline = create_pipeline(
-                        &device,
-                        &pipeline_layout,
-                        &swapchain_capabilities,
-                        &vertex_shader,
-                        &fragment_shader,
-                    );
-                    state.pipeline = render_pipeline;
-                    window.request_redraw();
+                    if let Ok(fragment_shader) = load_shader(&path, &device) {
+                        let render_pipeline = create_pipeline(
+                            &device,
+                            &pipeline_layout,
+                            &swapchain_capabilities,
+                            &vertex_shader,
+                            &fragment_shader,
+                        );
+                        state.pipeline = render_pipeline;
+                        window.request_redraw();
+                    }
                 }
             },
             Event::WindowEvent {
