@@ -26,6 +26,16 @@ fn load_shader(path: &str, device: &Device) -> Result<ShaderModule, ParseError> 
     }
 }
 
+fn read_or_create_shader(path: &str) -> Cow<str> {
+    if std::path::Path::exists(std::path::Path::new(path)) {
+        Cow::Owned(std::fs::read_to_string(path).unwrap())
+    } else {
+        let shader = include_str!("fragment.default.wgsl");
+        std::fs::write(path, shader);
+        Cow::Owned(shader.to_string())
+    }
+}
+
 fn create_pipeline(
     device: &Device,
     pipeline_layout: &PipelineLayout,
@@ -217,19 +227,22 @@ async fn run(event_loop: EventLoop<CustomEvent>, window: Window, shader_path: &s
                 frame.present();
             }
             Event::UserEvent(event) => match event {
-                CustomEvent::ShaderFileChangedEvent(path) => {
-                    if let Ok(fragment_shader) = load_shader(&path, &device) {
+                CustomEvent::ShaderFileChangedEvent(path) => match load_shader(&path, &device) {
+                    Ok(shader) => {
+                        println!("Shader validated!");
                         let render_pipeline = create_pipeline(
                             &device,
                             &pipeline_layout,
                             &swapchain_capabilities,
                             &vertex_shader,
-                            &fragment_shader,
+                            &shader,
                         );
                         state.pipeline = render_pipeline;
-                        window.request_redraw();
                     }
-                }
+                    Err(e) => {
+                        println!("{e}");
+                    }
+                },
             },
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
@@ -251,16 +264,6 @@ struct Cli {
 #[derive(Debug)]
 enum CustomEvent {
     ShaderFileChangedEvent(String),
-}
-
-fn read_or_create_shader(path: &str) -> Cow<str> {
-    if std::path::Path::exists(std::path::Path::new(path)) {
-        Cow::Owned(std::fs::read_to_string(path).unwrap())
-    } else {
-        let shader = include_str!("fragment.default.wgsl");
-        std::fs::write(path, shader);
-        Cow::Owned(shader.to_string())
-    }
 }
 
 fn main() {
@@ -293,12 +296,17 @@ fn main() {
         for res in rx {
             match res {
                 Ok(event) => {
+                    match event.kind {
+                        notify::EventKind::Modify(_) => {
+                            event_loop_proxy
+                                .send_event(CustomEvent::ShaderFileChangedEvent(String::from(
+                                    &shader_path,
+                                )))
+                                .ok();
+                        }
+                        _ => (),
+                    }
                     // println!("{event:?}");
-                    event_loop_proxy
-                        .send_event(CustomEvent::ShaderFileChangedEvent(String::from(
-                            &shader_path,
-                        )))
-                        .ok();
                 }
                 Err(e) => println!("watch error: {:?}", e),
             }
