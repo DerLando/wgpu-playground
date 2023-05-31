@@ -9,5 +9,5 @@ var<uniform> time: u32; // Ellapsed time in ms
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.coord, sin(f32(time) * 0.001), 1.0);
+    return vec4<f32>(in.coord, abs(sin(f32(time) * 0.001)), 1.0);
 }
