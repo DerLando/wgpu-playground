@@ -15,6 +15,8 @@ use winit::{
     window::Window,
 };
 
+mod canvas;
+
 fn load_shader(path: &str, device: &Device) -> Result<ShaderModule, ParseError> {
     let shader = read_or_create_shader(path);
     match naga::front::wgsl::parse_str(&shader) {
